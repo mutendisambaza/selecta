@@ -46,7 +46,38 @@ def cmd_cues(args) -> int:
 
 
 def cmd_sequence(args) -> int:
-    print("selecta sequence: not implemented yet")
+    from pathlib import Path
+
+    from selecta.pipeline import analyze_folder
+    from selecta.render.plan import render
+    from selecta.sequencing.sequencer import sequence
+    from selecta.store.db import FeatureStore
+
+    store = FeatureStore(args.db)
+    try:
+        analysed, skipped, failed = analyze_folder(args.folder, store)
+        tracks = store.all()
+    finally:
+        store.close()
+
+    if not tracks:
+        print("sequence: no analysable tracks found")
+        return 1
+
+    ordered, stranded = sequence(tracks, profile=args.arc)
+
+    out_md = Path(args.out)
+    out_json = out_md.with_suffix(".json")
+    out_md.write_text(render(ordered, "markdown"), encoding="utf-8")
+    out_json.write_text(render(ordered, "json"), encoding="utf-8")
+
+    print(f"\nsequence [{args.arc}]: {len(ordered)} tracks  "
+          f"(analysed {analysed}, skipped {skipped}, failed {failed})")
+    print(f"  plan  -> {out_md}")
+    print(f"  data  -> {out_json}")
+    if stranded:
+        print(f"  ⚠ {len(stranded)} track(s) with weak transitions (trust your ears): "
+              + ", ".join((t.title or Path(t.path).stem) for t in stranded))
     return 0
 
 
