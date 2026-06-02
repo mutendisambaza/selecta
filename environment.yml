@@ -6,6 +6,7 @@ dependencies:
   - python=3.12
   - librosa        # pulls numpy, scipy, soundfile, audioread, numba, etc.
   - ffmpeg         # decoding (mp3/m4a) for librosa/audioread
+  - mutagen        # read ID3/title/artist tags for the Rekordbox export
   - pytest
   - pip
   # NB: rubberband (time-stretch) is only for the future audio-render layer,
