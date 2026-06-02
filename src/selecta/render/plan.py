@@ -43,7 +43,9 @@ def _transition(previous: OrderedTrack, current: OrderedTrack) -> dict[str, obje
     track = current.track
     intro_phrase = _first_phrase(track.phrases, "intro")
     outro_phrase = _first_phrase(prev_track.phrases, "outro")
-    intro_start = intro_phrase.start if intro_phrase is not None else 0.0
+    # "bring in at" = the groove entry, i.e. the END of the intro phrase, not 0:00.
+    # Fallback: start of the first non-intro phrase, else track start.
+    bring_in_at = _groove_entry(track.phrases, intro_phrase)
     outro_start = outro_phrase.start if outro_phrase is not None else prev_track.duration
     bpm_pct = 0.0
     if prev_track.bpm > 0:
@@ -53,7 +55,7 @@ def _transition(previous: OrderedTrack, current: OrderedTrack) -> dict[str, obje
         "from_key": prev_track.key_camelot,
         "to_key": track.key_camelot,
         "bpm_pct": bpm_pct,
-        "intro_cue": _format_timestamp(intro_start),
+        "intro_cue": _format_timestamp(bring_in_at),
         "outro_cue": _format_timestamp(outro_start),
     }
 
@@ -97,6 +99,19 @@ def _render_markdown(items: list[dict[str, object]]) -> str:
             lines.append(line)
 
     return "\n".join(lines)
+
+
+def _groove_entry(phrases: tuple[PhraseRegion, ...], intro_phrase: PhraseRegion | None) -> float:
+    """Where to bring the track in: end of the intro phrase (groove entry).
+
+    Falls back to the start of the first non-intro phrase, else the track start.
+    """
+    if intro_phrase is not None:
+        return intro_phrase.end
+    for phrase in phrases:
+        if phrase.label != "intro":
+            return phrase.start
+    return 0.0
 
 
 def _first_phrase(phrases: tuple[PhraseRegion, ...], label: str) -> PhraseRegion | None:

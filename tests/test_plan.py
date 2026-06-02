@@ -122,7 +122,7 @@ def test_render_markdown_includes_tracks_and_transitions():
     assert output.count("↳") == 2
     assert "BPM +3.3%" in output
     assert "BPM +1.6%" in output
-    assert "bring in at 0:32" in output
+    assert "bring in at 1:04" in output  # intro END (groove entry), not intro start
     assert "swap bass at 1:04" in output
     assert "low confidence — trust your ears" in output
 
@@ -138,7 +138,7 @@ def test_render_json_returns_loadable_transition_data():
         "from_key": "8A",
         "to_key": "9A",
         "bpm_pct": pytest.approx(3.3333333333333335),
-        "intro_cue": "0:32",
+        "intro_cue": "1:04",
         "outro_cue": "3:12",
         "swap_bass_at": "1:04",
     }
@@ -146,7 +146,7 @@ def test_render_json_returns_loadable_transition_data():
     third_transition = payload[2]["transition"]
     assert third_transition["from_key"] == "9A"
     assert third_transition["to_key"] == "9B"
-    assert third_transition["intro_cue"] == "0:48"
+    assert third_transition["intro_cue"] == "1:12"  # intro END (groove entry)
     assert third_transition["outro_cue"] == "4:20"
     assert third_transition["swap_bass_at"] == "1:20"
     assert third_transition["confidence_note"] == "low confidence — trust your ears"
@@ -155,3 +155,20 @@ def test_render_json_returns_loadable_transition_data():
 def test_render_rejects_unknown_format():
     with pytest.raises(ValueError):
         render(_ordered(), "xml")
+
+
+def test_bring_in_at_uses_intro_end():
+    from selecta.features.types import PhraseRegion, TrackFeatures
+    from selecta.sequencing.sequencer import OrderedTrack
+    from selecta.render.plan import render
+    import json
+
+    def mk(path, intro_end):
+        return TrackFeatures(path=path, duration=300, bpm=120, bpm_confidence=1,
+            beats=(), key_camelot="8A", key_confidence=1, energy_curve=(), intensity=0.5,
+            spectral={}, phrases=(PhraseRegion(0.0, intro_end, 16, "intro", 0.9),
+                                   PhraseRegion(intro_end, 300, 32, "body", 0.9)))
+    a = OrderedTrack(track=mk("a", 16.0), position=0, arc_pos=0.0, arc_target=0.2, incoming_score=None)
+    b = OrderedTrack(track=mk("b", 16.0), position=1, arc_pos=1.0, arc_target=0.5, incoming_score=80.0)
+    data = json.loads(render([a, b], "json"))
+    assert data[1]["transition"]["intro_cue"] == "0:16"   # intro END, not 0:00
