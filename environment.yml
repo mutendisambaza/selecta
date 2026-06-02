@@ -1,13 +1,13 @@
 name: selecta
 channels:
   - conda-forge
+  - nodefaults
 dependencies:
   - python=3.12
-  - librosa
-  - numpy
-  - scipy
-  - soundfile
-  - ffmpeg
-  - rubberband
+  - librosa        # pulls numpy, scipy, soundfile, audioread, numba, etc.
+  - ffmpeg         # decoding (mp3/m4a) for librosa/audioread
   - pytest
   - pip
+  # NB: rubberband (time-stretch) is only for the future audio-render layer,
+  # not the plan-only MVP, and is unavailable on conda-forge osx-arm64.
+  # It is already installed system-wide via Homebrew for when that lands.
