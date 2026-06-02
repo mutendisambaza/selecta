@@ -1,0 +1,28 @@
+# Selecta tuning config — edit by ear.
+
+[scoring.weights]
+# Relative importance of each transition dimension (summed, normalised).
+harmonic = 0.30
+tempo    = 0.25
+energy   = 0.20
+spectral = 0.15
+phrase   = 0.10
+
+[arc.experiential]
+# Journey intensity targets (0-1) at normalised set positions (0-1).
+# Ethereal/melodic start -> build -> peak (~0.7) -> resolve, with a deliberate mid dip.
+points = [
+  [0.00, 0.15],
+  [0.25, 0.45],
+  [0.45, 0.35],   # deliberate dip — release before the climb
+  [0.70, 0.95],   # peak
+  [0.85, 0.70],
+  [1.00, 0.30],   # resolve
+]
+
+[arc.just_mix]
+# Flat-ish: optimise smooth transitions, minimal narrative shape.
+points = [
+  [0.00, 0.50],
+  [1.00, 0.55],
+]
