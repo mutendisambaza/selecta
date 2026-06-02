@@ -21,6 +21,25 @@ Selecta answers the questions a DJ asks when prepping and building a set: *"wher
 are the phrases in this track, what plays well after what, where do I bring the
 next one in, and does the whole thing flow?"*
 
+### Positioning
+Selecta is a **DJ's assistant and coach** — it does not replace the DJ's taste,
+it removes the cold-start problem so you never work from a blank library:
+- **Baselining / foundation** — phrase cues plus a suggested setlist give you a
+  *starting skeleton* to refine, not a blank page.
+- **On-the-fly** — because the prep is done (cues on the waveform, "what mixes
+  next" pre-computed), in-the-moment decisions are faster and more confident.
+- **Coach** — the per-dimension score breakdown explains *why* a transition works
+  or clashes, teaching the reasoning rather than handing down a verdict.
+
+This positioning reinforces the **explainable heuristic** choice (§4.3): a
+transparent, decomposable score can coach; an opaque "82/100" cannot — which is
+why ML scoring stays a future layer, not the v1 brain.
+
+> **Scope note:** v1 is *prep that pays off live* — offline/batch analysis whose
+> value shows up in the moment. A real **real-time live mode** (listen to what's
+> playing, suggest next tracks on the fly) is captured as future work (§8), not
+> built in v1.
+
 ### Non-goals (v1)
 - Does **not** render or export mixed audio (no time-stretch/EQ/crossfade output).
 - Does **not** use machine learning or audio embeddings for scoring.
@@ -234,6 +253,12 @@ The interfaces above are stable so these slot in without rework:
   collection and is sensitive to Pioneer DB-format changes.
 - **Other DJ software targets** — Serato (GEOB ID3 cue frames) / Traktor (NML)
   exporters behind the same interface.
+- **Real-time live mode** — listen to the currently playing audio (line-in or
+  software capture), identify/locate the track, and surface "what mixes next"
+  suggestions live from the pre-analysed library. Reuses the §4.3 scorer against
+  the §4.2 store; the new work is low-latency audio capture + track identification.
+  This is the "on-the-fly" half of the positioning, realised as a live engine
+  rather than prep.
 
 ## 9. Tech Stack
 
