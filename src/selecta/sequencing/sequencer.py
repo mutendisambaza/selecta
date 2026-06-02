@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import fsum
 
 from selecta.features.types import TrackFeatures
@@ -38,6 +38,13 @@ def sequence(
     points = load_profile(profile, config_path)
     active_weights = dict(_DEFAULT_WEIGHTS if weights is None else weights)
 
+    # Rank-based arc mapping: real-world tracks (esp. mastered, uniformly-loud
+    # genres like amapiano) have tightly-clustered absolute intensity, so matching
+    # it directly against the arc gives almost no ordering signal. Replace each
+    # track's intensity with its rank/percentile within THIS set, so the small but
+    # real energy differences spread to fill the low->peak->resolve journey.
+    tracks = _rank_intensities(tracks)
+
     ordered_tracks = _greedy_sequence(tracks, points, active_weights)
     ordered_tracks = _refine_with_2opt(ordered_tracks, points, active_weights)
 
@@ -48,6 +55,25 @@ def sequence(
         if item.incoming_score is not None and item.incoming_score < _STRANDED_THRESHOLD
     ]
     return (ordered, stranded)
+
+
+def _rank_intensities(tracks: list[TrackFeatures]) -> list[TrackFeatures]:
+    """Replace each track's intensity with its percentile rank within the set.
+
+    The lowest-energy track gets 0.0, the highest 1.0, the rest spread evenly by
+    rank. Other fields (bpm, key, title, phrases) are untouched. This makes the
+    arc-adherence signal meaningful even when absolute intensities barely differ.
+    """
+    total = len(tracks)
+    if total == 1:
+        return [replace(tracks[0], intensity=0.5)]
+
+    order = sorted(range(total), key=lambda i: tracks[i].intensity)
+    percentile_by_index = {idx: rank / (total - 1) for rank, idx in enumerate(order)}
+    return [
+        replace(track, intensity=percentile_by_index[index])
+        for index, track in enumerate(tracks)
+    ]
 
 
 def _greedy_sequence(

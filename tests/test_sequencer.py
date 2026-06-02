@@ -103,10 +103,14 @@ def test_sequence_orders_tracks_once_and_follows_arc_targets():
     ]
     assert [item.arc_target for item in ordered] == expected_targets
 
-    median_intensity = median(track.intensity for track in tracks)
-    assert ordered[0].track.intensity <= median_intensity
+    # NOTE: the sequencer rank-maps intensity to a percentile within the set, so
+    # ordered[*].track.intensity is the relative rank (0..1), not the input value.
+    # The arc-shape intent still holds: lowest-energy track near the start, the
+    # highest-energy track in the back half.
+    ordered_intensities = [item.track.intensity for item in ordered]
+    assert ordered[0].track.intensity <= median(ordered_intensities)
 
-    max_intensity = max(track.intensity for track in tracks)
+    max_intensity = max(ordered_intensities)
     max_index = next(
         index for index, item in enumerate(ordered) if item.track.intensity == max_intensity
     )
