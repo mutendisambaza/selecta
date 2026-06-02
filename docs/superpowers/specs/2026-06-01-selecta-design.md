@@ -1,12 +1,20 @@
-# Selecta — DJ Auto-Mix Setlist Planner
+# Selecta — A Music Information Retrieval (MIR) Assistant for DJs
 
 **Date:** 2026-06-01
 **Status:** Design approved (pending spec review)
 
 ## 1. Purpose
 
-Point Selecta at a folder of electronic (4-on-the-floor) tracks and get back two
-things, both built on the same per-track analysis:
+Selecta is, at its core, a **Music Information Retrieval (MIR)** application built
+for DJs. MIR is the field of extracting musical meaning from audio signals —
+tempo, beat grid, key, energy, timbre/spectral content, and structure/phrasing.
+Selecta runs that MIR analysis over a DJ's library and turns the extracted
+features into practical prep and decision tooling: phrase cues, mix-compatibility
+scoring, and set sequencing. Everything downstream is an application of the same
+MIR feature layer.
+
+Point Selecta at a folder of tracks and get back two things, both built on the
+same per-track MIR analysis:
 
 1. **A sequenced DJ setlist with per-transition instructions** — a *plan*, not a
    rendered audio file. Selecta scores how well every pair would mix using a
@@ -47,11 +55,24 @@ why ML scoring stays a future layer, not the v1 brain.
 
 ## 2. Scope & Assumptions
 
-- **Music:** electronic, 4/4, steady tempo, clean 8/16/32-bar phrasing.
+- **Music:** DJ-oriented electronic with a South-African lean — **house, tech
+  house, Afro house / Afrotech, gqom, amapiano**. These split into two tiers for
+  analysis confidence:
+  - **Tier 1 — 4-on-the-floor (high confidence):** house, tech, Afrotech. Steady
+    tempo, strong 4/4, clean 8/16/32-bar phrasing. Beat grid, downbeat and phrase
+    detection are reliable here; this is the primary v1 target.
+  - **Tier 2 — broken-beat (supported, lower confidence):** **gqom** (sparse,
+    syncopated, frequently *not* four-on-the-floor) and **amapiano** (~112–115 BPM,
+    log-drum syncopation, prone to half/double-time BPM mis-detection). These
+    break the steady-4/4 assumption, so downbeat/phrase detection is harder and
+    BPM can be mis-octaved. v1 still handles them but **flags lower confidence**,
+    and they are the most likely reason to pull the `madmom` upgrade forward (§8).
 - **Outputs:** Markdown plan + JSON (the setlist); `rekordbox.xml` (the cues).
 - **Scoring brain:** hand-tuned weighted heuristic with a per-dimension breakdown.
-- **Platform:** macOS (ARM). Python **3.12** venv (system 3.14 is too new for the
-  audio stack). `ffmpeg` + `rubberband` already present via Homebrew.
+- **Platform / environment:** macOS (ARM), managed with **conda** (miniforge).
+  A pinned `environment.yml` provides an isolated Python **3.12** plus the native
+  audio stack — sidestepping system Python 3.14 (too new for the audio libs) and
+  the painful from-source pip builds. See §9.
 - **DSP:** **librosa-first**; add `madmom` only if downbeat/phrasing quality is
   insufficient.
 
@@ -260,13 +281,58 @@ The interfaces above are stable so these slot in without rework:
   This is the "on-the-fly" half of the positioning, realised as a live engine
   rather than prep.
 
-## 9. Tech Stack
+## 9. Environment & Tech Stack
 
-- Python 3.12 (dedicated venv).
-- librosa, numpy, scipy, soundfile.
-- SQLite (stdlib `sqlite3`).
-- TOML config (stdlib `tomllib`).
-- CLI via `argparse` or `click`.
-- Rekordbox XML via stdlib `xml.etree.ElementTree` (no new dep). `pyrekordbox`
+### 9.1 Environment: conda (miniforge)
+
+Selecta's environment is managed with **conda**, declared in a pinned
+`environment.yml` at the repo root. Conda is the right tool here for reasons
+specific to this project:
+
+- **It owns the Python version.** Conda creates an isolated env with Python 3.12,
+  fully independent of the machine's system Python 3.14. No `pyenv`, no global
+  pollution — `conda activate selecta` and you're on the right interpreter.
+- **It installs native (non-Python) dependencies too.** The audio stack isn't
+  pure Python — librosa pulls compiled `numba`/`llvmlite`, and the project needs
+  `ffmpeg`, `libsndfile`, and `rubberband`. Conda installs these *binaries into
+  the env* from the **conda-forge** channel, so the project is self-contained and
+  reproducible across machines (no "works on my mac" Homebrew drift).
+- **It de-risks the hard libraries.** `madmom` and `essentia` (the future
+  phrasing/DSP upgrades) are notoriously painful to `pip install` from source on
+  macOS ARM, but ship as prebuilt conda-forge packages. Choosing conda now means
+  those upgrades are a one-line `environment.yml` change later, not a build fight.
+- **Reproducibility as infra.** `environment.yml` is checked into git and is the
+  single source of truth for the environment; `conda env export` snapshots exact
+  versions. This is the "robust, reproducible build" goal made concrete.
+
+**Installer status:** conda 25.7.0 is already present (Homebrew miniconda, base at
+`/opt/homebrew/Caskroom/miniconda/base`) with the fast **libmamba** solver already
+default — no reinstall required. The one adjustment: the global config currently
+lists only the `defaults` channel, but Selecta's audio stack (and the future
+`madmom`/`essentia`) lives on **conda-forge**. Rather than change global config,
+`environment.yml` pins `channels: [conda-forge]` for *this env only*, which also
+sidesteps the `defaults`-channel commercial-use ToS. (A `defaults`-free,
+conda-forge-first base like miniforge is a fine alternative but unnecessary here.)
+
+**Day-one workflow:**
+```bash
+conda env create -f environment.yml   # build the env from the pinned spec
+conda activate selecta                 # enter it
+selecta analyze ~/Music/crate          # run
+```
+
+> Where it fits the pipeline: conda is the *foundation layer* under everything in
+> §3 — every component runs inside the `selecta` conda env. It is the first thing
+> the implementation plan stands up, before any feature code.
+
+### 9.2 Libraries
+
+- **Python 3.12** (via the conda env).
+- **Audio/MIR:** `librosa`, `numpy`, `scipy`, `soundfile` (conda-forge). `madmom` /
+  `essentia` reserved for the future phrasing/DSP upgrade.
+- **Native deps (conda-forge):** `ffmpeg`, `libsndfile`, `rubberband`.
+- **Storage:** SQLite via stdlib `sqlite3`.
+- **Config:** TOML via stdlib `tomllib`.
+- **CLI:** `argparse` or `click`.
+- **Rekordbox XML:** stdlib `xml.etree.ElementTree` (no new dep). `pyrekordbox`
   only if/when the future direct-write backend is built.
-- ffmpeg + rubberband (system, already installed).
