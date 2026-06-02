@@ -38,3 +38,12 @@ def test_detect_tempo_on_synthesized_click_track() -> None:
 
     assert intervals.size > 0
     assert np.allclose(intervals, 0.5, atol=0.07)
+
+
+def test_fold_bpm_corrects_half_time():
+    from selecta.features.tempo import _fold_bpm
+
+    assert abs(_fold_bpm(63.0) - 126.0) < 1e-6   # amapiano half-time -> doubled
+    assert abs(_fold_bpm(124.0) - 124.0) < 1e-6  # in-range unchanged
+    assert abs(_fold_bpm(200.0) - 100.0) < 1e-6  # too-fast -> halved
+    assert _fold_bpm(0.0) == 0.0
