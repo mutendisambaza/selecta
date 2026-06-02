@@ -13,12 +13,19 @@ _CENTROID_REFERENCE_HZ = 4000.0
 # that maps to 1.0. 0.50 means "half of all beat energy in the HF band = max score".
 _BEAT_HF_REFERENCE = 0.50
 
+# DynamicComplexity: mean absolute deviation of per-frame loudness (dB).
+# Empirically validated on MUZE ROOF amapiano crate: r=+0.33 with perceived
+# intensity — higher DC = more dynamic punch. Reference 8.0 dB clips to 1.0.
+_DC_FRAME_SEC    = 0.2
+_DC_REFERENCE_DB = 8.0
+
 # Lower bound of the "high-frequency" band used for beat-sync HF fraction.
 _HF_CUTOFF_HZ = 4000.0
 
 # Composite weights (must sum to 1.0).
-_CENTROID_WEIGHT = 0.55
-_BEAT_HF_WEIGHT = 0.45
+_CENTROID_WEIGHT = 0.50
+_BEAT_HF_WEIGHT  = 0.35
+_DC_WEIGHT       = 0.15
 
 _N_FFT = 2048
 _MIN_BEATS_FOR_SYNC = 4  # fall back to frame-average when too few beats detected
@@ -32,17 +39,20 @@ def energy_profile(
     The energy curve is the frame RMS normalized to [0, 1] by the track's own peak
     (relative shape only — not cross-track comparable).
 
-    The intensity scalar is a spectral-brightness composite robust to loudness-
+    The intensity scalar is a three-feature composite robust to loudness-
     normalized / heavily mastered material:
 
       1. Spectral centroid (mean across frames) clipped to a fixed reference
          frequency. Captures spectral tilt without reference to absolute level.
       2. Beat-synchronized HF fraction — proportion of power above _HF_CUTOFF_HZ
          at detected beat positions. Falls back to frame-average if <4 beats found.
+      3. DynamicComplexity — mean absolute deviation of per-frame loudness (dB).
+         Empirically validated on an amapiano crate (r=+0.33): more dynamic
+         punch correlates with higher perceived energy.
 
-    Both are spectral *shape* measures, so they remain discriminating even when
-    mean RMS is uniform across a uniformly-mastered crate (e.g. amapiano).
-    The sequencer applies a final rank/percentile calibration on top.
+    All three are normalized to fixed references (no per-track normalization), so
+    values are cross-track comparable. The sequencer applies a final rank/percentile
+    calibration on top as a set-composition smoothing layer.
     """
     samples = np.asarray(y, dtype=float)
 
@@ -89,9 +99,23 @@ def energy_profile(
 
     beat_hf_score = float(np.clip(beat_hf_frac / _BEAT_HF_REFERENCE, 0.0, 1.0))
 
+    # Feature 3: DynamicComplexity — mean abs deviation of per-frame loudness
+    dc_hop = max(1, int(_DC_FRAME_SEC * sr))
+    dc_rms = _rms(samples, hop_length=dc_hop)
+    if dc_rms.size >= 4:
+        db_frames = librosa.amplitude_to_db(dc_rms, ref=float(np.max(dc_rms)) + 1e-10)
+        active = db_frames > -60.0
+        db_active = db_frames[active] if active.sum() >= 4 else db_frames
+        dc = float(np.mean(np.abs(db_active - np.mean(db_active))))
+    else:
+        dc = 0.0
+    dc_score = float(np.clip(dc / _DC_REFERENCE_DB, 0.0, 1.0))
+
     intensity = float(
         np.clip(
-            _CENTROID_WEIGHT * spectral_brightness + _BEAT_HF_WEIGHT * beat_hf_score,
+            _CENTROID_WEIGHT * spectral_brightness
+            + _BEAT_HF_WEIGHT * beat_hf_score
+            + _DC_WEIGHT * dc_score,
             0.0,
             1.0,
         )
