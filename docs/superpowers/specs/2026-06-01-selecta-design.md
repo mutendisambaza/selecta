@@ -16,10 +16,13 @@ MIR feature layer.
 Point Selecta at a folder of tracks and get back two things, both built on the
 same per-track MIR analysis:
 
-1. **A sequenced DJ setlist with per-transition instructions** — a *plan*, not a
-   rendered audio file. Selecta scores how well every pair would mix using a
-   transparent heuristic and orders the library into a coherent set that follows
-   an energy arc.
+1. **A sequenced DJ set that takes the listener on a journey** — plus the key
+   insights behind it. Not just "tracks that mix," but an *order with narrative
+   shape* (ethereal/melodic start → build → peak → resolve), with per-transition
+   instructions and the per-dimension reasoning for each placement. A *plan*, not
+   a rendered audio file. The ambition is **one-shot**: point Selecta at a folder
+   and get back a set good enough to play with light refinement — precision out of
+   the gate, sharpened over time.
 2. **Preset phrase cue points exported to Rekordbox** — every track's detected
    phrase boundaries (intro / build / drop / breakdown / outro) written as
    labelled cues that show up on the waveform in Rekordbox, so the prep work of
@@ -147,8 +150,13 @@ Extracts:
 breakdown**. Directional (A→B may differ from B→A).
 
 Weighted blend of dimensions:
-- **Harmonic** — Camelot adjacency. Same key = best; ±1 on wheel or
-  relative major/minor = good; energy-boost moves = ok; distant = clash.
+- **Harmonic** — Camelot adjacency, encoding real harmonic-mixing theory.
+  Same key = perfect (100%); **±1 on the wheel = the workhorse move** (one note
+  changes, listener barely notices); relative major/minor (same number, swap
+  letter) = a **mood shift** — minor→major *lifts/brightens*, major→minor
+  *darkens/drives*; the +7 "energy-boost" jump = usable; distant keys = clash.
+  The scorer is **direction-aware**: which harmonic move is "good" depends on
+  whether the journey wants to lift, drive, or hold steady at that point.
 - **Tempo** — % stretch to match B to A; small gaps best; half/double-time
   treated as compatible.
 - **Energy** — controlled delta in the direction the arc wants at that point.
@@ -163,17 +171,41 @@ returns the breakdown, never a bare number, so decisions are explainable.
 **Interface:** `score(a: TrackFeatures, b: TrackFeatures, arc_pos: float) -> TransitionScore`
 
 ### 4.4 Sequencer
-**Job:** library of `TrackFeatures` → an ordered setlist.
+**Job:** library of `TrackFeatures` → an ordered setlist that takes the listener
+on a **journey**. This is the headline of Selecta — the part that does the work a
+good DJ does: not just "tracks that mix," but tracks in an *order with narrative
+shape*.
 
-- Build the pairwise score matrix over all tracks.
-- Find an ordering via **greedy nearest-neighbour → 2-opt refinement**.
-- Constrain by a **target energy arc** (configurable profile, e.g.
-  `warmup → build → peak → cooldown`): each track's intensity should match its
-  position on the arc, and the objective combines transition quality + arc
-  adherence.
-- Each track used at most once (TSP-flavoured path, not a cycle).
+**The journey arc (v1 default).** Grounded in how DJs actually build sets — a set
+is chapters with deliberate tension and release, because the valleys are what make
+the peaks hit:
+1. **Intro / warm-up** — slow, melodic, ethereal, calmer. Sets mood, low intensity.
+2. **Build** — rising energy and tension, tightening groove.
+3. **Peak** — the high-vibe section; the emotional and energetic high point.
+4. **Comedown / resolve** *(if appropriate)* — release the tension and end with a
+   meaningful final statement, not a hard stop.
+
+The arc is **not a monotonic climb**: it deliberately includes dips (release)
+between peaks so the high points land. Each track's intensity (from §4.1's energy
+summary) is matched to its position on the arc; harmonic moves (§4.3) are chosen
+to *lift* into builds and *resolve* on the comedown.
+
+**Algorithm.** Build the pairwise score matrix; find an ordering via
+**greedy nearest-neighbour → 2-opt refinement**; the objective combines
+**(a)** transition quality and **(b)** journey-arc adherence (intensity-vs-position
+fit + tension/release shape). Each track used at most once (TSP-flavoured path,
+not a cycle). Tracks that can't be placed without hurting the journey are reported
+as stranded rather than forced in.
+
+**One-shot intent.** The goal is that a single run on a folder yields a set good
+enough to play with light human refinement — precision out of the gate, sharpened
+over time. Quality of the *journey objective* is where that precision is won or
+lost, so it is the primary tuning target (see §7's ear-tuning loop).
 
 **Interface:** `sequence(tracks, arc_profile) -> list[OrderedTrack]`
+
+> The arc profile is a parameter, which is what makes the future **Set Selector**
+> (§8) — choosing *which* journey algorithm to run — a config swap, not a rewrite.
 
 ### 4.5 Plan Renderer
 **Job:** ordered setlist → human + machine output.
@@ -274,6 +306,17 @@ The interfaces above are stable so these slot in without rework:
   collection and is sensitive to Pioneer DB-format changes.
 - **Other DJ software targets** — Serato (GEOB ID3 cue frames) / Traktor (NML)
   exporters behind the same interface.
+- **Set Selector (selectable journey algorithms)** — choose the sequencing
+  objective that fits the moment, each a different weighting of the §4.4 objective:
+  - **Just Mix** — optimise only for smooth transitions and things sounding good
+    together; minimal narrative shape. Fast, safe, utilitarian.
+  - **Experiential** — the full world-class headlining journey (think a Madison
+    Square Garden closing set): strong narrative arc, deliberate tension/release,
+    emotional peaks and resolution.
+  - …and room for more (e.g. genre-specific or warm-up-only profiles).
+  v1 ships a single default (the Experiential journey arc); because the arc/
+  objective is already a parameter (§4.4), adding the selector is a config + CLI
+  flag change, not a rewrite.
 - **Real-time live mode** — listen to the currently playing audio (line-in or
   software capture), identify/locate the track, and surface "what mixes next"
   suggestions live from the pre-analysed library. Reuses the §4.3 scorer against
@@ -336,3 +379,17 @@ selecta analyze ~/Music/crate          # run
 - **CLI:** `argparse` or `click`.
 - **Rekordbox XML:** stdlib `xml.etree.ElementTree` (no new dep). `pyrekordbox`
   only if/when the future direct-write backend is built.
+
+## 10. References — DJ curation theory (informs §4.3/§4.4)
+
+The journey arc and harmonic-move logic are grounded in established DJ practice:
+- DJ sets as chapters with deliberate tension/release; valleys make peaks land;
+  closing as a meaningful resolution, not just a fade
+  ([djoid](https://www.djoid.io/articles/how-to-prepare-a-house-dj-set-in-chapters),
+  [ZIPDJ](https://www.zipdj.com/blog/how-to-structure-a-dj-set),
+  [DJs On Demand](https://www.djsondemand.co.uk/how-to-build-energy-in-a-dj-set/)).
+- Camelot harmonic mixing — same key / ±1 / relative major↔minor mood shifts,
+  clockwise = energy up
+  ([Mixed In Key](https://mixedinkey.com/camelot-wheel/),
+  [DJ.Studio](https://dj.studio/blog/camelot-wheel),
+  [Audio Sorcerer](https://audiosorcerer.com/post/camelot-wheel)).
