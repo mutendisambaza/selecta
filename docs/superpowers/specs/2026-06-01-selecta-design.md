@@ -5,14 +5,21 @@
 
 ## 1. Purpose
 
-Point Selecta at a folder of electronic (4-on-the-floor) tracks and get back a
-**sequenced DJ setlist with per-transition instructions** — a *plan*, not a
-rendered audio file. It analyses each track, scores how well every pair would
-mix using a transparent heuristic, and orders the library into a coherent set
-that follows an energy arc.
+Point Selecta at a folder of electronic (4-on-the-floor) tracks and get back two
+things, both built on the same per-track analysis:
 
-Selecta answers the question a DJ asks when building a set: *"what plays well
-after what, where do I bring the next one in, and does the whole thing flow?"*
+1. **A sequenced DJ setlist with per-transition instructions** — a *plan*, not a
+   rendered audio file. Selecta scores how well every pair would mix using a
+   transparent heuristic and orders the library into a coherent set that follows
+   an energy arc.
+2. **Preset phrase cue points exported to Rekordbox** — every track's detected
+   phrase boundaries (intro / build / drop / breakdown / outro) written as
+   labelled cues that show up on the waveform in Rekordbox, so the prep work of
+   marking phrases is done automatically across the whole library.
+
+Selecta answers the questions a DJ asks when prepping and building a set: *"where
+are the phrases in this track, what plays well after what, where do I bring the
+next one in, and does the whole thing flow?"*
 
 ### Non-goals (v1)
 - Does **not** render or export mixed audio (no time-stretch/EQ/crossfade output).
@@ -22,7 +29,7 @@ after what, where do I bring the next one in, and does the whole thing flow?"*
 ## 2. Scope & Assumptions
 
 - **Music:** electronic, 4/4, steady tempo, clean 8/16/32-bar phrasing.
-- **Output:** Markdown plan (human-readable) + JSON (machine-readable).
+- **Outputs:** Markdown plan + JSON (the setlist); `rekordbox.xml` (the cues).
 - **Scoring brain:** hand-tuned weighted heuristic with a per-dimension breakdown.
 - **Platform:** macOS (ARM). Python **3.12** venv (system 3.14 is too new for the
   audio stack). `ffmpeg` + `rubberband` already present via Homebrew.
@@ -43,17 +50,23 @@ letting the scoring/sequencing logic be iterated on instantly.
                                        │ Feature Store│  (SQLite, hash-keyed)
                                        └──────────────┘
                                                │
-        ┌──────────────────────────────────────┘
-        ▼
-  ┌──────────────┐   pairwise    ┌────────────┐   ordering   ┌───────────────┐
-  │Pairwise Score│ ────────────► │ Sequencer  │ ───────────► │ Plan Renderer │
-  │  (heuristic) │   matrix      │ (greedy+2opt│              │ (md + json)   │
-  └──────────────┘               │  under arc)│              └───────────────┘
-                                 └────────────┘
+        ┌──────────────────────────────────────┼───────────────────────┐
+        ▼                                       │                       ▼
+  ┌──────────────┐   pairwise    ┌────────────┐ │           ┌────────────────────┐
+  │Pairwise Score│ ────────────► │ Sequencer  │ │           │   Cue Exporter     │
+  │  (heuristic) │   matrix      │ (greedy+2opt│ │           │ phrase map → cues  │
+  └──────────────┘               │  under arc)│ │           │ → rekordbox.xml    │
+                                 └─────┬──────┘ │           └────────────────────┘
+                                       ▼        │
+                              ┌───────────────┐ │
+                              │ Plan Renderer │◄┘
+                              │ (md + json)   │
+                              └───────────────┘
 ```
 
-CLI exposes the two phases: `selecta analyze <folder>` and
-`selecta sequence <folder> [--arc <profile>]`.
+CLI exposes three commands: `selecta analyze <folder>` (extract + cache),
+`selecta sequence <folder> [--arc <profile>]` (the setlist plan), and
+`selecta cues <folder> [--out rekordbox.xml]` (the Rekordbox phrase cues).
 
 ## 4. Components
 
@@ -132,10 +145,39 @@ returns the breakdown, never a bare number, so decisions are explainable.
 Transition points come from aligning A's outro phrase boundary with B's intro
 phrase boundary on the downbeat grid.
 
-### 4.6 CLI
+### 4.6 Cue Exporter
+**Job:** `TrackFeatures` (one or many) → a `rekordbox.xml` carrying phrase cue
+points that display on the waveform in Rekordbox. Consumes the phrase map from
+§4.1 — **no change to extraction**.
+
+- **Format:** Rekordbox XML (`DJ_PLAYLISTS` → `COLLECTION` → `TRACK` → repeated
+  `<POSITION_MARK>`). Import-based: the user points Rekordbox at the file
+  (Preferences → Advanced → Database → rekordbox xml); cues arrive when tracks
+  are dragged into the collection. **Never writes the live Rekordbox database**,
+  so there is no corruption risk.
+- **Cue mapping:**
+  - Every phrase boundary → a **memory cue** (`Num = -1`), labelled by region
+    (Intro / Build / Drop / Breakdown / Outro). Unlimited, full coverage.
+  - The key moments — first drop, main breakdown, outro start (and intro start) —
+    are **promoted to hot cues** in slots A–H (`Num = 0..7`) for instant jumping.
+    Capped at 8; if more key moments than slots, keep the highest-priority ones
+    and leave the rest as memory cues.
+  - Cue positions are **absolute seconds**, independent of Rekordbox's beatgrid.
+- **Confidence:** low-confidence downbeat/phrase detections are labelled (e.g.
+  `Drop?`) so the user knows to eyeball them.
+- **Track identity:** `<TRACK>` `Location` is the file URI; existing tags
+  (title/artist/BPM/key) are written so Rekordbox matches to the right file.
+
+**Interface:** `export_cues(tracks: list[TrackFeatures], out_path: str) -> None`
+**Tested by:** golden-file test on emitted XML for a fixture track; schema-validate
+that Rekordbox-required attributes are present.
+
+### 4.7 CLI
 - `selecta analyze <folder>` — extract + cache features (skips unchanged files).
 - `selecta sequence <folder> [--arc <profile>] [--out <path>]` — score, order,
   render plan. Assumes analyse has run (or runs it implicitly for new files).
+- `selecta cues <folder> [--out rekordbox.xml]` — export Rekordbox phrase cues
+  for every analysed track. Also runs analyse implicitly for new files.
 
 ## 5. Data Flow
 
@@ -143,6 +185,11 @@ phrase boundary on the downbeat grid.
    files, upserts into the store.
 2. `sequence` loads all features, computes the pairwise matrix, runs the sequencer
    under the chosen arc, renders the plan to Markdown + JSON.
+3. `cues` loads all features, maps each track's phrase map to memory + hot cues,
+   and writes a single `rekordbox.xml` for the library.
+
+The two outputs (§4.5 plan, §4.6 cues) are independent consumers of the same
+cached features — either can run without the other.
 
 ## 6. Error Handling
 
@@ -162,6 +209,10 @@ phrase boundary on the downbeat grid.
 - **Sequencer:** small synthetic libraries with a known-optimal order; assert the
   arc constraint is respected and each track used once.
 - **Plan Renderer:** golden-file tests on Markdown/JSON output.
+- **Cue Exporter:** golden-file test on emitted `rekordbox.xml`; assert required
+  `POSITION_MARK` attributes (Name, Type, Start, Num) and that hot-cue slots stay
+  within A–H. Manual check: import once into Rekordbox, confirm cues land on the
+  waveform at the right phrases.
 - **Tuning loop (not a test):** a scratch notebook to audition scoring weights
   against a real library by ear.
 
@@ -177,6 +228,12 @@ The interfaces above are stable so these slot in without rework:
   available).
 - **madmom upgrade** — swap in for downbeat/phrase detection if librosa's
   phrasing proves insufficient.
+- **Direct Rekordbox write** (`pyrekordbox`) — a second Cue Exporter backend that
+  writes cues straight into the Rekordbox database + ANLZ files (no import step).
+  Same `export_cues()` interface; gated behind backups because it mutates the live
+  collection and is sensitive to Pioneer DB-format changes.
+- **Other DJ software targets** — Serato (GEOB ID3 cue frames) / Traktor (NML)
+  exporters behind the same interface.
 
 ## 9. Tech Stack
 
@@ -185,4 +242,6 @@ The interfaces above are stable so these slot in without rework:
 - SQLite (stdlib `sqlite3`).
 - TOML config (stdlib `tomllib`).
 - CLI via `argparse` or `click`.
+- Rekordbox XML via stdlib `xml.etree.ElementTree` (no new dep). `pyrekordbox`
+  only if/when the future direct-write backend is built.
 - ffmpeg + rubberband (system, already installed).
