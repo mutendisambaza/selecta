@@ -13,8 +13,40 @@ import argparse
 import sys
 
 
-def _not_implemented(name: str) -> int:
-    print(f"selecta {name}: not implemented yet")
+def cmd_analyze(args) -> int:
+    from selecta.pipeline import analyze_folder
+    from selecta.store.db import FeatureStore
+
+    store = FeatureStore(args.db)
+    try:
+        analysed, skipped, failed = analyze_folder(args.folder, store)
+    finally:
+        store.close()
+    print(f"\nanalyze: {analysed} analysed, {skipped} skipped, {failed} failed  (db: {args.db})")
+    return 0
+
+
+def cmd_cues(args) -> int:
+    from selecta.export.rekordbox import export_cues
+    from selecta.pipeline import analyze_folder
+    from selecta.store.db import FeatureStore
+
+    store = FeatureStore(args.db)
+    try:
+        analysed, skipped, failed = analyze_folder(args.folder, store)
+        tracks = store.all()
+    finally:
+        store.close()
+    export_cues(tracks, args.out)
+    print(f"\ncues: wrote {len(tracks)} tracks -> {args.out}  "
+          f"(analysed {analysed}, skipped {skipped}, failed {failed})")
+    if failed:
+        print(f"  note: {failed} file(s) failed to analyse and are not in the export")
+    return 0
+
+
+def cmd_sequence(args) -> int:
+    print("selecta sequence: not implemented yet")
     return 0
 
 
@@ -40,12 +72,16 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+_HANDLERS = {"analyze": cmd_analyze, "cues": cmd_cues, "sequence": cmd_sequence}
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     if not args.command:
-        build_parser().print_help()
+        parser.print_help()
         return 0
-    return _not_implemented(args.command)
+    return _HANDLERS[args.command](args)
 
 
 if __name__ == "__main__":
